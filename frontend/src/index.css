@@ -1,0 +1,38 @@
+
+.row {
+  background: white;
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+}
+
+.row.dragging {
+  background: #e0f7fa;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.table th {
+  background: #f0f0f0;
+  padding: 10px;
+  border: 1px solid #ddd;
+}
+
+.table td {
+  padding: 10px;
+  border: 1px solid #ddd;
+  text-align: center;
+}
+
+.placeholder {
+  background: #c8e6c9;
+  height: 50px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
