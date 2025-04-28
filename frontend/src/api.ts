@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:3001';
+const API_URL = '';
 
 export const getItems = async (search = '', offset = 0, limit = 20) => {
     const response = await axios.get(`${API_URL}/items`, {
