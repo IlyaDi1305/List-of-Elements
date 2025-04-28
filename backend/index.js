@@ -3,7 +3,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const path = require('path');
-const {v4: uuidv4} = require('uuid');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = 3001;
@@ -45,6 +45,7 @@ function saveSortedOrder() {
     fs.writeFileSync(sortedOrderFile, JSON.stringify(Array.from(sortedOrder.entries())));
 }
 
+// ============ API маршруты ============
 app.get('/items', (req, res) => {
     const search = (req.query.search || '').toLowerCase();
     const offset = parseInt(req.query.offset) || 0;
@@ -70,25 +71,25 @@ app.get('/items', (req, res) => {
         selected: item.selected || false
     }));
 
-    res.json({items: result, total: itemsArray.length});
+    res.json({ items: result, total: itemsArray.length });
 });
 
 app.post('/select', (req, res) => {
-    const {id, selected} = req.body;
+    const { id, selected } = req.body;
 
     const item = sortedOrder.get(id);
     if (item) {
         item.selected = selected;
         sortedOrder.set(id, item);
         saveSortedOrderDebounced();
-        res.json({success: true});
+        res.json({ success: true });
     } else {
-        res.status(400).json({error: 'Item not found'});
+        res.status(400).json({ error: 'Item not found' });
     }
 });
 
 app.post('/sort', (req, res) => {
-    const {id1, id2} = req.body;
+    const { id1, id2 } = req.body;
 
     const itemsArray = Array.from(sortedOrder.values());
 
@@ -96,7 +97,7 @@ app.post('/sort', (req, res) => {
     const index2 = itemsArray.findIndex(item => item.id === id2);
 
     if (index1 === -1 || index2 === -1) {
-        return res.status(400).json({error: 'Invalid IDs'});
+        return res.status(400).json({ error: 'Invalid IDs' });
     }
 
     const temp = itemsArray[index1];
@@ -111,8 +112,18 @@ app.post('/sort', (req, res) => {
 
     saveSortedOrder();
 
-    res.json({success: true});
+    res.json({ success: true });
 });
+
+// ============ Отдача фронтенда ============
+
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
+
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
+});
+
+// ============ Запуск сервера ============
 
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);

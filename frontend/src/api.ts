@@ -17,6 +17,6 @@ export const selectItem = async (id: string, selected: boolean) => {
     });
 };
 
-export const postOrder = async ({id1, id2}: { id1: number, id2: number }) => {
+export const postOrder = async ({id1, id2}: { id1: string, id2: string }) => {
     await axios.post(`${API_URL}/sort`, {id1, id2});
 };

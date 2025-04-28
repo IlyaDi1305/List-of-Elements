@@ -59,11 +59,11 @@ const Table: React.FC = () => {
         }
     };
 
-    const onDragStart = (e: React.DragEvent, id: string) => {
+    const onDragStart = (_: React.DragEvent, id: string) => {
         DraggingId = id;
     };
 
-    const onDrop = (e: React.DragEvent, id: string) => {
+    const onDrop = (_: React.DragEvent, id: string) => {
         if (!DraggingId || DraggingId === id) return;
 
         const updated = new Map(items);
