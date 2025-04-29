@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useCallback, useRef} from 'react';
+import React, {useState, useEffect} from 'react';
 import {postBatchChanges} from './api';
 import InfiniteScroll from 'react-infinite-scroll-component';
 
@@ -18,20 +18,20 @@ const Table: React.FC = () => {
     const [offset, setOffset] = useState(0);
     const [search, setSearch] = useState('');
     const [isFetching, setIsFetching] = useState(false);
-    const controllerRef = useRef<AbortController | null>(null);
+    let controller: AbortController | null = null;
 
-    const fetchItems = useCallback(async (reset = false) => {
+    const fetchItems = async (reset = false) => {
         if (isFetching) return;
         setIsFetching(true);
 
-        if (controllerRef.current) controllerRef.current.abort();
-        controllerRef.current = new AbortController();
+        if (controller) controller.abort();
+        controller = new AbortController();
 
         const currentOffset = reset ? 0 : offset;
 
         try {
             const res = await fetch(`/items?search=${encodeURIComponent(search)}&offset=${currentOffset}&limit=20`, {
-                signal: controllerRef.current.signal
+                signal: controller.signal
             });
 
             const data = await res.json();
@@ -57,7 +57,7 @@ const Table: React.FC = () => {
         }
 
         setIsFetching(false);
-    }, [search, offset, isFetching]);
+    };
 
 
     useEffect(() => {
@@ -80,7 +80,7 @@ const Table: React.FC = () => {
         }, 300);
 
         return () => clearTimeout(delay);
-    }, [fetchItems, search]);
+    }, [search]);
 
 // авто-сохранение пакетом
     useEffect(() => {
