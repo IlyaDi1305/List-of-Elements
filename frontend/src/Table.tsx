@@ -1,5 +1,5 @@
-import React, {useState, useEffect} from 'react';
-import {getItems, selectItem, postOrder} from './api';
+import React, {useState, useEffect, useCallback, useRef} from 'react';
+import {postBatchChanges} from './api';
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 interface Item {
@@ -10,6 +10,7 @@ interface Item {
 }
 
 let DraggingId: string | null = null;
+const pendingItems: Map<string, Item> = new Map();
 
 const Table: React.FC = () => {
     const [items, setItems] = useState<Map<string, Item>>(new Map());
@@ -17,45 +18,91 @@ const Table: React.FC = () => {
     const [offset, setOffset] = useState(0);
     const [search, setSearch] = useState('');
     const [isFetching, setIsFetching] = useState(false);
+    const controllerRef = useRef<AbortController | null>(null);
 
-
-    const fetchItems = async (reset = false) => {
+    const fetchItems = useCallback(async (reset = false) => {
         if (isFetching) return;
         setIsFetching(true);
 
+        if (controllerRef.current) controllerRef.current.abort();
+        controllerRef.current = new AbortController();
+
         const currentOffset = reset ? 0 : offset;
-        const data = await getItems(search, currentOffset, 20);
 
-        const itemsMap = new Map<string, Item>();
-        data.items.forEach((item: Item) => {
-            itemsMap.set(item.id, item);
-        });
+        try {
+            const res = await fetch(`/items?search=${encodeURIComponent(search)}&offset=${currentOffset}&limit=20`, {
+                signal: controllerRef.current.signal
+            });
 
-        if (reset) {
-            setItems(itemsMap);
-            setOffset(data.items.length);
-        } else {
-            setItems((prev) => new Map([...prev, ...itemsMap]));
-            setOffset((prev) => prev + data.items.length);
+            const data = await res.json();
+
+            const itemsMap = new Map<string, Item>();
+            data.items.forEach((item: Item) => {
+                itemsMap.set(item.id, item);
+            });
+
+            if (reset) {
+                setItems(itemsMap);
+                setOffset(data.items.length);
+            } else {
+                setItems(prev => new Map([...prev, ...itemsMap]));
+                setOffset(prev => prev + data.items.length);
+            }
+
+            setHasMore(data.items.length > 0);
+        } catch (e: unknown) {
+            if (e instanceof Error && e.name !== 'AbortError') {
+                console.error('Ошибка при получении данных:', e);
+            }
         }
 
-        setHasMore(data.items.length > 0);
         setIsFetching(false);
-    };
+    }, [search, offset, isFetching]);
+
 
     useEffect(() => {
-        fetchItems(true);
-    }, [search]);
+        const cached = localStorage.getItem('cachedItems');
+        if (cached) {
+            try {
+                const parsed = new Map<string, Item>(JSON.parse(cached));
+                setItems(parsed);
+                setOffset(parsed.size);
+            } catch (e) {
+                console.error('Ошибка чтения кэша:', e);
+            }
+        }
+    }, []);
 
-    const handleSelect = async (id: string) => {
+// debounce-поиск
+    useEffect(() => {
+        const delay = setTimeout(() => {
+            void fetchItems(true);
+        }, 300);
+
+        return () => clearTimeout(delay);
+    }, [fetchItems, search]);
+
+// авто-сохранение пакетом
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (pendingItems.size > 0) {
+                const batch = Array.from(pendingItems.values());
+                void postBatchChanges(batch);
+                pendingItems.clear();
+            }
+        }, 3000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const handleSelect = (id: string) => {
         const updated = new Map(items);
         const item = updated.get(id);
         if (item) {
             item.selected = !item.selected;
             updated.set(id, item);
+            pendingItems.set(id, item);
+            localStorage.setItem('cachedItems', JSON.stringify(Array.from(updated.entries())));
             setItems(updated);
-
-            selectItem(id, item.selected);
         }
     };
 
@@ -77,18 +124,17 @@ const Table: React.FC = () => {
 
             updated.set(item1.id, item1);
             updated.set(item2.id, item2);
+            pendingItems.set(item1.id, item1);
+            pendingItems.set(item2.id, item2);
 
+            localStorage.setItem('cachedItems', JSON.stringify(Array.from(updated.entries())));
             setItems(updated);
-
-            postOrder({id1: item1.id, id2: item2.id});
         }
 
         DraggingId = null;
     };
 
-    const onDragOver = (e: React.DragEvent) => {
-        e.preventDefault();
-    };
+    const onDragOver = (e: React.DragEvent) => e.preventDefault();
 
     const handleSearchInput = (e: React.ChangeEvent<HTMLInputElement>) => {
         setSearch(e.target.value);
@@ -97,25 +143,13 @@ const Table: React.FC = () => {
     };
 
     return (
-        <div style={{
-            backgroundColor: '#ffffff',
-            padding: '20px',
-            minHeight: '100vh',
-            fontFamily: 'Arial, sans-serif'
-        }}>
+        <div style={{padding: '20px', fontFamily: 'Arial'}}>
             <input
                 type="text"
                 placeholder="Search..."
                 value={search}
                 onChange={handleSearchInput}
-                style={{
-                    marginBottom: '20px',
-                    padding: '8px',
-                    width: '300px',
-                    borderRadius: '5px',
-                    border: '1px solid #ccc',
-                    outline: 'none'
-                }}
+                style={{marginBottom: '15px', padding: '8px', width: '250px'}}
             />
             <InfiniteScroll
                 dataLength={items.size}
@@ -141,21 +175,8 @@ const Table: React.FC = () => {
                 height={900}
                 style={{paddingBottom: '100px'}}
             >
-                <table style={{
-                    width: '100%',
-                    borderCollapse: 'collapse',
-                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                    borderRadius: '10px',
-                    overflow: 'hidden'
-                }}>
-                    <thead style={{
-                        position: 'sticky',
-                        top: 0,
-                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                        backdropFilter: 'blur(5px)',
-                        fontWeight: 'bold',
-                        fontSize: '16px'
-                    }}>
+                <table style={{width: '100%', borderCollapse: 'collapse'}}>
+                    <thead style={{background: '#f2f2f2'}}>
                     <tr>
                         <th style={{padding: '12px', textAlign: 'left', borderBottom: '1px solid #ccc'}}>№</th>
                         <th style={{padding: '12px', textAlign: 'center', borderBottom: '1px solid #ccc'}}>Name</th>
