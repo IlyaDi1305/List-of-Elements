@@ -1,5 +1,5 @@
-import React, {useState, useEffect} from 'react';
-import {postBatchChanges} from './api';
+import React, { useState, useEffect, useRef } from 'react';
+import { postBatchChanges } from './api';
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 interface Item {
@@ -11,6 +11,7 @@ interface Item {
 
 let DraggingId: string | null = null;
 const pendingItems: Map<string, Item> = new Map();
+const hasPendingChanges = { current: false };
 
 const Table: React.FC = () => {
     const [items, setItems] = useState<Map<string, Item>>(new Map());
@@ -18,24 +19,28 @@ const Table: React.FC = () => {
     const [offset, setOffset] = useState(0);
     const [search, setSearch] = useState('');
     const [isFetching, setIsFetching] = useState(false);
-    let controller: AbortController | null = null;
+    const [isBooting, setIsBooting] = useState(true);
+    const [isLoadingSearch, setIsLoadingSearch] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
 
-    const fetchItems = async (reset = false) => {
-        if (isFetching) return;
+    const controllerRef = useRef<AbortController | null>(null);
+
+    const fetchItems = async (reset = false, skipIfPending = false) => {
+        if (isFetching || (skipIfPending && hasPendingChanges.current)) return;
         setIsFetching(true);
+        if (reset) setIsLoadingSearch(true);
 
-        if (controller) controller.abort();
-        controller = new AbortController();
+        if (controllerRef.current) controllerRef.current.abort();
+        controllerRef.current = new AbortController();
 
         const currentOffset = reset ? 0 : offset;
 
         try {
             const res = await fetch(`/items?search=${encodeURIComponent(search)}&offset=${currentOffset}&limit=20`, {
-                signal: controller.signal
+                signal: controllerRef.current.signal
             });
 
             const data = await res.json();
-
             const itemsMap = new Map<string, Item>();
             data.items.forEach((item: Item) => {
                 itemsMap.set(item.id, item);
@@ -50,6 +55,33 @@ const Table: React.FC = () => {
             }
 
             setHasMore(data.items.length > 0);
+
+            const localRaw = localStorage.getItem('cachedItems');
+            if (localRaw) {
+                const localMap = new Map<string, Item>(JSON.parse(localRaw));
+                const diffItems: Item[] = [];
+
+                for (const item of itemsMap.values()) {
+                    const localItem = localMap.get(item.id);
+                    if (
+                        localItem &&
+                        (localItem.position !== item.position || localItem.selected !== item.selected)
+                    ) {
+                        diffItems.push(localItem);
+                    }
+                }
+
+                if (diffItems.length > 0) {
+                    setIsSyncing(true);
+                    await postBatchChanges(diffItems);
+                    const updatedLocal = localStorage.getItem('cachedItems');
+                    if (updatedLocal) {
+                        const parsed = new Map<string, Item>(JSON.parse(updatedLocal));
+                        setItems(parsed);
+                    }
+                    setIsSyncing(false);
+                }
+            }
         } catch (e: unknown) {
             if (e instanceof Error && e.name !== 'AbortError') {
                 console.error('Ошибка при получении данных:', e);
@@ -57,8 +89,8 @@ const Table: React.FC = () => {
         }
 
         setIsFetching(false);
+        setIsLoadingSearch(false);
     };
-
 
     useEffect(() => {
         const cached = localStorage.getItem('cachedItems');
@@ -71,9 +103,12 @@ const Table: React.FC = () => {
                 console.error('Ошибка чтения кэша:', e);
             }
         }
+
+        setTimeout(() => {
+            void fetchItems(true, true);
+        }, 300);
     }, []);
 
-// debounce-поиск
     useEffect(() => {
         const delay = setTimeout(() => {
             void fetchItems(true);
@@ -82,16 +117,24 @@ const Table: React.FC = () => {
         return () => clearTimeout(delay);
     }, [search]);
 
-// авто-сохранение пакетом
     useEffect(() => {
         const interval = setInterval(() => {
             if (pendingItems.size > 0) {
                 const batch = Array.from(pendingItems.values());
-                void postBatchChanges(batch);
-                pendingItems.clear();
+                void postBatchChanges(batch).then(() => {
+                    hasPendingChanges.current = false;
+                    pendingItems.clear();
+                });
             }
         }, 3000);
         return () => clearInterval(interval);
+    }, []);
+
+    useEffect(() => {
+        const bootTimeout = setTimeout(() => {
+            setIsBooting(false);
+        }, 1000);
+        return () => clearTimeout(bootTimeout);
     }, []);
 
     const handleSelect = (id: string) => {
@@ -101,6 +144,7 @@ const Table: React.FC = () => {
             item.selected = !item.selected;
             updated.set(id, item);
             pendingItems.set(id, item);
+            hasPendingChanges.current = true;
             localStorage.setItem('cachedItems', JSON.stringify(Array.from(updated.entries())));
             setItems(updated);
         }
@@ -126,6 +170,7 @@ const Table: React.FC = () => {
             updated.set(item2.id, item2);
             pendingItems.set(item1.id, item1);
             pendingItems.set(item2.id, item2);
+            hasPendingChanges.current = true;
 
             localStorage.setItem('cachedItems', JSON.stringify(Array.from(updated.entries())));
             setItems(updated);
@@ -142,8 +187,31 @@ const Table: React.FC = () => {
         setItems(new Map());
     };
 
+    if (isBooting || isLoadingSearch || isSyncing) {
+        return (
+            <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '100vh'
+            }}>
+                <div style={{
+                    border: '4px solid #f3f3f3',
+                    borderTop: '4px solid #3498db',
+                    borderRadius: '50%',
+                    width: '40px',
+                    height: '40px',
+                    animation: 'spin 1s linear infinite'
+                }} />
+            </div>
+        );
+    }
+
     return (
-        <div style={{padding: '20px', fontFamily: 'Arial'}}>
+        <div
+            id="scrollableDiv"
+            style={{padding: '20px', fontFamily: 'Arial', height: '100vh', overflow: 'auto'}}
+        >
             <input
                 type="text"
                 placeholder="Search..."
@@ -155,22 +223,25 @@ const Table: React.FC = () => {
                 dataLength={items.size}
                 next={() => fetchItems()}
                 hasMore={hasMore}
+                scrollableTarget="scrollableDiv"
                 loader={
-                    <div style={{
-                        display: 'flex',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        padding: '20px'
-                    }}>
+                    hasMore && !isFetching ? (
                         <div style={{
-                            border: '4px solid #f3f3f3',
-                            borderTop: '4px solid #3498db',
-                            borderRadius: '50%',
-                            width: '30px',
-                            height: '30px',
-                            animation: 'spin 1s linear infinite'
-                        }}/>
-                    </div>
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            padding: '20px'
+                        }}>
+                            <div style={{
+                                border: '4px solid #f3f3f3',
+                                borderTop: '4px solid #3498db',
+                                borderRadius: '50%',
+                                width: '30px',
+                                height: '30px',
+                                animation: 'spin 1s linear infinite'
+                            }}/>
+                        </div>
+                    ) : null
                 }
                 height={900}
                 style={{paddingBottom: '100px'}}
@@ -203,9 +274,7 @@ const Table: React.FC = () => {
                                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(135,206,250,0.5)')}
                                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = item.selected ? 'rgba(173, 216, 230, 0.4)' : 'rgba(255, 255, 255, 0.8)')}
                             >
-                                <td style={{padding: '10px', textAlign: 'left'}}>
-                                    {item.position}
-                                </td>
+                                <td style={{padding: '10px', textAlign: 'left'}}>{item.position}</td>
                                 <td style={{padding: '10px'}}>{item.name}</td>
                                 <td style={{padding: '10px'}}>
                                     <input
