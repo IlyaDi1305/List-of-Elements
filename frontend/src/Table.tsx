@@ -225,8 +225,8 @@ const Table: React.FC = () => {
                 hasMore={hasMore}
                 scrollableTarget="scrollableDiv"
                 loader={hasMore && !isFetching ? (
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
-                        <div style={{ border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', width: '30px', height: '30px', animation: 'spin 1s linear infinite' }} />
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px', color: '#999' }}>
+                        ↓ Scroll down to load more
                     </div>
                 ) : null}
                 height={900}
