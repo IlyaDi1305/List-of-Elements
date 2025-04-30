@@ -18,6 +18,7 @@ const Table: React.FC = () => {
     const [hasMore, setHasMore] = useState(true);
     const [offset, setOffset] = useState(0);
     const [search, setSearch] = useState('');
+    const [inputValue, setInputValue] = useState('');
     const [isFetching, setIsFetching] = useState(false);
     const [isBooting, setIsBooting] = useState(true);
     const [isLoadingSearch, setIsLoadingSearch] = useState(false);
@@ -25,7 +26,7 @@ const Table: React.FC = () => {
 
     const controllerRef = useRef<AbortController | null>(null);
 
-    const fetchItems = async (reset = false, skipIfPending = false) => {
+    const fetchItems = async (reset = false, skipIfPending = false, customSearch?: string) => {
         if (isFetching || (skipIfPending && hasPendingChanges.current)) return;
         setIsFetching(true);
         if (reset) setIsLoadingSearch(true);
@@ -34,9 +35,10 @@ const Table: React.FC = () => {
         controllerRef.current = new AbortController();
 
         const currentOffset = reset ? 0 : offset;
+        const searchQuery = customSearch ?? search;
 
         try {
-            const res = await fetch(`/items?search=${encodeURIComponent(search)}&offset=${currentOffset}&limit=20`, {
+            const res = await fetch(`/items?search=${encodeURIComponent(searchQuery)}&offset=${currentOffset}&limit=20`, {
                 signal: controllerRef.current.signal
             });
 
@@ -54,7 +56,7 @@ const Table: React.FC = () => {
                 setOffset(prev => prev + data.items.length);
             }
 
-            setHasMore(data.items.length > 0);
+            setHasMore(currentOffset + data.items.length < data.total);
 
             const localRaw = localStorage.getItem('cachedItems');
             if (localRaw) {
@@ -108,14 +110,6 @@ const Table: React.FC = () => {
             void fetchItems(true, true);
         }, 300);
     }, []);
-
-    useEffect(() => {
-        const delay = setTimeout(() => {
-            void fetchItems(true);
-        }, 300);
-
-        return () => clearTimeout(delay);
-    }, [search]);
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -182,76 +176,68 @@ const Table: React.FC = () => {
     const onDragOver = (e: React.DragEvent) => e.preventDefault();
 
     const handleSearchInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setSearch(e.target.value);
-        setOffset(0);
-        setItems(new Map());
+        setInputValue(e.target.value);
+    };
+
+    const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            setSearch(inputValue);
+            setOffset(0);
+            setItems(new Map());
+            void fetchItems(true, false, inputValue);
+        }
     };
 
     if (isBooting || isLoadingSearch || isSyncing) {
         return (
-            <div style={{
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                height: '100vh'
-            }}>
-                <div style={{
-                    border: '4px solid #f3f3f3',
-                    borderTop: '4px solid #3498db',
-                    borderRadius: '50%',
-                    width: '40px',
-                    height: '40px',
-                    animation: 'spin 1s linear infinite'
-                }} />
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+                <div style={{ border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite' }} />
             </div>
         );
     }
 
     return (
-        <div
-            id="scrollableDiv"
-            style={{padding: '20px', fontFamily: 'Arial', height: '100vh', overflow: 'auto'}}
-        >
-            <input
-                type="text"
-                placeholder="Search..."
-                value={search}
-                onChange={handleSearchInput}
-                style={{marginBottom: '15px', padding: '8px', width: '250px'}}
-            />
+        <div id="scrollableDiv" style={{ padding: '20px', fontFamily: 'Arial', height: '100vh', overflow: 'auto' }}>
+            <div style={{ marginBottom: '15px', display: 'flex', gap: '10px' }}>
+                <input
+                    type="text"
+                    placeholder="Search..."
+                    value={inputValue}
+                    onChange={handleSearchInput}
+                    onKeyDown={handleSearchKeyDown}
+                    style={{ padding: '8px', width: '250px' }}
+                />
+                <button
+                    onClick={() => {
+                        setSearch(inputValue);
+                        setOffset(0);
+                        setItems(new Map());
+                        void fetchItems(true, false, inputValue);
+                    }}
+                    style={{ padding: '8px 16px', backgroundColor: '#3498db', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                >
+                    OK
+                </button>
+            </div>
             <InfiniteScroll
                 dataLength={items.size}
-                next={() => fetchItems()}
+                next={() => fetchItems(false, false, search)}
                 hasMore={hasMore}
                 scrollableTarget="scrollableDiv"
-                loader={
-                    hasMore && !isFetching ? (
-                        <div style={{
-                            display: 'flex',
-                            justifyContent: 'center',
-                            alignItems: 'center',
-                            padding: '20px'
-                        }}>
-                            <div style={{
-                                border: '4px solid #f3f3f3',
-                                borderTop: '4px solid #3498db',
-                                borderRadius: '50%',
-                                width: '30px',
-                                height: '30px',
-                                animation: 'spin 1s linear infinite'
-                            }}/>
-                        </div>
-                    ) : null
-                }
+                loader={hasMore && !isFetching ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
+                        <div style={{ border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', width: '30px', height: '30px', animation: 'spin 1s linear infinite' }} />
+                    </div>
+                ) : null}
                 height={900}
-                style={{paddingBottom: '100px'}}
+                style={{ paddingBottom: '100px' }}
             >
-                <table style={{width: '100%', borderCollapse: 'collapse'}}>
-                    <thead style={{background: '#f2f2f2'}}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead style={{ background: '#f2f2f2' }}>
                     <tr>
-                        <th style={{padding: '12px', textAlign: 'left', borderBottom: '1px solid #ccc'}}>№</th>
-                        <th style={{padding: '12px', textAlign: 'center', borderBottom: '1px solid #ccc'}}>Name</th>
-                        <th style={{padding: '12px', textAlign: 'center', borderBottom: '1px solid #ccc'}}>Select</th>
+                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #ccc' }}>№</th>
+                        <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #ccc' }}>Name</th>
+                        <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #ccc' }}>Select</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -274,9 +260,9 @@ const Table: React.FC = () => {
                                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(135,206,250,0.5)')}
                                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = item.selected ? 'rgba(173, 216, 230, 0.4)' : 'rgba(255, 255, 255, 0.8)')}
                             >
-                                <td style={{padding: '10px', textAlign: 'left'}}>{item.position}</td>
-                                <td style={{padding: '10px'}}>{item.name}</td>
-                                <td style={{padding: '10px'}}>
+                                <td style={{ padding: '10px', textAlign: 'left' }}>{item.position}</td>
+                                <td style={{ padding: '10px' }}>{item.name}</td>
+                                <td style={{ padding: '10px' }}>
                                     <input
                                         type="checkbox"
                                         checked={item.selected}
