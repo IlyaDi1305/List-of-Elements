@@ -43,7 +43,6 @@ async function saveSortedOrder() {
     console.log('Данные успешно сохранены');
 }
 
-// Загрузить при старте
 loadSortedOrder();
 
 // ============ API маршруты ============
@@ -98,14 +97,12 @@ app.post('/batchSave', async (req, res) => {
     }
 });
 
-// ============ Отдача фронтенда ============
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
 app.get('', (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/dist', 'index.html'));
 });
 
-// ============ Запуск сервера ============
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });

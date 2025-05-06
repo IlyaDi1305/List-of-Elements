@@ -1,13 +1,23 @@
-
-.row {
-  background: white;
-  padding: 8px;
-  border-bottom: 1px solid #ddd;
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
-.row.dragging {
-  background: #e0f7fa;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+#scrollableDiv {
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.search-bar {
+  position: sticky;
+  top: 0;
+  background: white;
+  z-index: 10;
+  padding: 10px 20px;
+  border-bottom: 1px solid #ccc;
 }
 
 .table {
@@ -19,17 +29,36 @@
   background: #f0f0f0;
   padding: 10px;
   border: 1px solid #ddd;
+  text-align: center;
+  font-weight: bold;
 }
 
 .table td {
   padding: 10px;
   border: 1px solid #ddd;
   text-align: center;
+  background: white;
+}
+
+.row {
+  background: white;
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+  cursor: grab;
+  transition: background-color 0.3s ease;
 }
 
 .placeholder {
   background: #c8e6c9;
   height: 50px;
+}
+
+.loader {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 10px;
+  color: #999;
 }
 
 @keyframes spin {

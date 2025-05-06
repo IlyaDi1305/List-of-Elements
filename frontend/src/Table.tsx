@@ -10,8 +10,6 @@ interface Item {
 }
 
 let DraggingId: string | null = null;
-const pendingItems: Map<string, Item> = new Map();
-const hasPendingChanges = { current: false };
 
 const Table: React.FC = () => {
     const [items, setItems] = useState<Map<string, Item>>(new Map());
@@ -22,12 +20,11 @@ const Table: React.FC = () => {
     const [isFetching, setIsFetching] = useState(false);
     const [isBooting, setIsBooting] = useState(true);
     const [isLoadingSearch, setIsLoadingSearch] = useState(false);
-    const [isSyncing, setIsSyncing] = useState(false);
 
     const controllerRef = useRef<AbortController | null>(null);
 
-    const fetchItems = async (reset = false, skipIfPending = false, customSearch?: string) => {
-        if (isFetching || (skipIfPending && hasPendingChanges.current)) return;
+    const fetchItems = async (reset = false, customSearch?: string) => {
+        if (isFetching) return;
         setIsFetching(true);
         if (reset) setIsLoadingSearch(true);
 
@@ -57,34 +54,7 @@ const Table: React.FC = () => {
             }
 
             setHasMore(currentOffset + data.items.length < data.total);
-
-            const localRaw = localStorage.getItem('cachedItems');
-            if (localRaw) {
-                const localMap = new Map<string, Item>(JSON.parse(localRaw));
-                const diffItems: Item[] = [];
-
-                for (const item of itemsMap.values()) {
-                    const localItem = localMap.get(item.id);
-                    if (
-                        localItem &&
-                        (localItem.position !== item.position || localItem.selected !== item.selected)
-                    ) {
-                        diffItems.push(localItem);
-                    }
-                }
-
-                if (diffItems.length > 0) {
-                    setIsSyncing(true);
-                    await postBatchChanges(diffItems);
-                    const updatedLocal = localStorage.getItem('cachedItems');
-                    if (updatedLocal) {
-                        const parsed = new Map<string, Item>(JSON.parse(updatedLocal));
-                        setItems(parsed);
-                    }
-                    setIsSyncing(false);
-                }
-            }
-        } catch (e: unknown) {
+        } catch (e) {
             if (e instanceof Error && e.name !== 'AbortError') {
                 console.error('Ошибка при получении данных:', e);
             }
@@ -95,52 +65,24 @@ const Table: React.FC = () => {
     };
 
     useEffect(() => {
-        const cached = localStorage.getItem('cachedItems');
-        if (cached) {
-            try {
-                const parsed = new Map<string, Item>(JSON.parse(cached));
-                setItems(parsed);
-                setOffset(parsed.size);
-            } catch (e) {
-                console.error('Ошибка чтения кэша:', e);
-            }
-        }
-
-        setTimeout(() => {
-            void fetchItems(true, true);
-        }, 300);
-    }, []);
-
-    useEffect(() => {
-        const interval = setInterval(() => {
-            if (pendingItems.size > 0) {
-                const batch = Array.from(pendingItems.values());
-                void postBatchChanges(batch).then(() => {
-                    hasPendingChanges.current = false;
-                    pendingItems.clear();
-                });
-            }
-        }, 3000);
-        return () => clearInterval(interval);
+        void fetchItems(true);
     }, []);
 
     useEffect(() => {
         const bootTimeout = setTimeout(() => {
             setIsBooting(false);
-        }, 1000);
+        }, 500);
         return () => clearTimeout(bootTimeout);
     }, []);
 
-    const handleSelect = (id: string) => {
+    const handleSelect = async (id: string) => {
         const updated = new Map(items);
         const item = updated.get(id);
         if (item) {
             item.selected = !item.selected;
             updated.set(id, item);
-            pendingItems.set(id, item);
-            hasPendingChanges.current = true;
-            localStorage.setItem('cachedItems', JSON.stringify(Array.from(updated.entries())));
-            setItems(updated);
+            setItems(new Map(updated));
+            await postBatchChanges([item]);
         }
     };
 
@@ -148,7 +90,7 @@ const Table: React.FC = () => {
         DraggingId = id;
     };
 
-    const onDrop = (_: React.DragEvent, id: string) => {
+    const onDrop = async (_: React.DragEvent, id: string) => {
         if (!DraggingId || DraggingId === id) return;
 
         const updated = new Map(items);
@@ -162,12 +104,9 @@ const Table: React.FC = () => {
 
             updated.set(item1.id, item1);
             updated.set(item2.id, item2);
-            pendingItems.set(item1.id, item1);
-            pendingItems.set(item2.id, item2);
-            hasPendingChanges.current = true;
+            setItems(new Map(updated));
 
-            localStorage.setItem('cachedItems', JSON.stringify(Array.from(updated.entries())));
-            setItems(updated);
+            await postBatchChanges([item1, item2]);
         }
 
         DraggingId = null;
@@ -184,21 +123,28 @@ const Table: React.FC = () => {
             setSearch(inputValue);
             setOffset(0);
             setItems(new Map());
-            void fetchItems(true, false, inputValue);
+            void fetchItems(true, inputValue);
         }
     };
 
-    if (isBooting || isLoadingSearch || isSyncing) {
+    if (isBooting || isLoadingSearch) {
         return (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-                <div style={{ border: '4px solid #f3f3f3', borderTop: '4px solid #3498db', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite' }} />
+                <div style={{
+                    border: '4px solid #f3f3f3',
+                    borderTop: '4px solid #3498db',
+                    borderRadius: '50%',
+                    width: '40px',
+                    height: '40px',
+                    animation: 'spin 1s linear infinite'
+                }} />
             </div>
         );
     }
 
     return (
-        <div id="scrollableDiv" style={{ padding: '20px', fontFamily: 'Arial', height: '100vh', overflow: 'auto' }}>
-            <div style={{ marginBottom: '15px', display: 'flex', gap: '10px' }}>
+        <div id="scrollableDiv">
+            <div className="search-bar" style={{ display: 'flex', gap: '10px', paddingLeft: '20px' }}>
                 <input
                     type="text"
                     placeholder="Search..."
@@ -212,32 +158,35 @@ const Table: React.FC = () => {
                         setSearch(inputValue);
                         setOffset(0);
                         setItems(new Map());
-                        void fetchItems(true, false, inputValue);
+                        void fetchItems(true, inputValue);
                     }}
-                    style={{ padding: '8px 16px', backgroundColor: '#3498db', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                    style={{
+                        padding: '8px 16px',
+                        backgroundColor: '#3498db',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                    }}
                 >
                     OK
                 </button>
             </div>
+
             <InfiniteScroll
                 dataLength={items.size}
-                next={() => fetchItems(false, false, search)}
+                next={() => fetchItems(false, search)}
                 hasMore={hasMore}
                 scrollableTarget="scrollableDiv"
-                loader={hasMore && !isFetching ? (
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '10px', color: '#999' }}>
-                        ↓ Scroll down to load more
-                    </div>
-                ) : null}
-                height={900}
+                loader={<div className="loader">↓ Scroll down to load more</div>}
                 style={{ paddingBottom: '100px' }}
             >
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead style={{ background: '#f2f2f2' }}>
+                <table className="table">
+                    <thead>
                     <tr>
-                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #ccc' }}>№</th>
-                        <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #ccc' }}>Name</th>
-                        <th style={{ padding: '12px', textAlign: 'center', borderBottom: '1px solid #ccc' }}>Select</th>
+                        <th>№</th>
+                        <th>Name</th>
+                        <th>Select</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -246,23 +195,15 @@ const Table: React.FC = () => {
                         .map((item) => (
                             <tr
                                 key={item.id}
+                                className="row" // без .selected
                                 draggable
                                 onDragStart={(e) => onDragStart(e, item.id)}
                                 onDrop={(e) => onDrop(e, item.id)}
                                 onDragOver={onDragOver}
-                                style={{
-                                    backgroundColor: item.selected ? 'rgba(173, 216, 230, 0.4)' : 'rgba(255, 255, 255, 0.8)',
-                                    cursor: 'grab',
-                                    textAlign: 'center',
-                                    borderBottom: '1px solid #ddd',
-                                    transition: 'background-color 0.3s ease'
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(135,206,250,0.5)')}
-                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = item.selected ? 'rgba(173, 216, 230, 0.4)' : 'rgba(255, 255, 255, 0.8)')}
                             >
-                                <td style={{ padding: '10px', textAlign: 'left' }}>{item.position}</td>
-                                <td style={{ padding: '10px' }}>{item.name}</td>
-                                <td style={{ padding: '10px' }}>
+                                <td>{item.position}</td>
+                                <td>{item.name}</td>
+                                <td>
                                     <input
                                         type="checkbox"
                                         checked={item.selected}
