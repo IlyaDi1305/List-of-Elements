@@ -26,7 +26,8 @@ const generateTestData = () => {
     }
     return testData;
 };
-let sortedOrder = {};
+
+let sortedOrder = new Map();
 
 async function loadSortedOrder() {
     try {
@@ -35,6 +36,7 @@ async function loadSortedOrder() {
     } catch (err) {
         console.log('Файл не найден или повреждён, генерируем новый...');
         sortedOrder = generateTestData();
+        await saveSortedOrder();
     }
 }
 
@@ -45,13 +47,13 @@ async function saveSortedOrder() {
 
 loadSortedOrder();
 
-// ============ API маршруты ============
 app.get('/items', (req, res) => {
     const search = (req.query.search || '').toLowerCase();
     const offset = parseInt(req.query.offset) || 0;
     const limit = parseInt(req.query.limit) || 20;
 
     let itemsArray = Array.from(sortedOrder.values());
+
     if (search) {
         itemsArray = itemsArray.filter(item =>
             item.name.toLowerCase().includes(search)
@@ -62,39 +64,47 @@ app.get('/items', (req, res) => {
 
     const paginatedItems = itemsArray.slice(offset, offset + limit);
 
-    const result = paginatedItems.map(item => ({
-        id: item.id,
-        name: item.name,
-        position: item.position,
-        selected: item.selected || false
-    }));
-
-    res.json({ items: result, total: itemsArray.length });
+    res.json({ items: paginatedItems, total: itemsArray.length });
 });
 
-app.post('/batchSave', async (req, res) => {
-    const { items } = req.body;
-
-    if (!Array.isArray(items)) {
-        return res.status(400).json({ error: 'Invalid format, expected items array' });
+app.post('/reorder', async (req, res) => {
+    const { draggedId, targetId } = req.body;
+    if (!draggedId || !targetId || draggedId === targetId) {
+        return res.status(400).json({ error: 'Invalid drag/drop IDs' });
     }
 
     try {
-        items.forEach(({ id, position, selected }) => {
-            const item = sortedOrder.get(id);
-            if (item) {
-                item.position = position;
-                item.selected = selected;
-                sortedOrder.set(id, item);
-            }
+        const allItems = Array.from(sortedOrder.values()).sort((a, b) => a.position - b.position);
+
+        const draggedIndex = allItems.findIndex(i => i.id === draggedId);
+        const dragged = allItems.splice(draggedIndex, 1)[0];
+
+        const targetIndex = allItems.findIndex(i => i.id === targetId);
+        allItems.splice(targetIndex, 0, dragged);
+
+        allItems.forEach((item, idx) => {
+            item.position = idx + 1;
+            sortedOrder.set(item.id, item);
         });
 
         await saveSortedOrder();
         res.json({ success: true });
     } catch (err) {
-        console.error('Ошибка при сохранении:', err);
-        res.status(500).json({ error: 'Ошибка сервера при сохранении' });
+        console.error('Ошибка reorder:', err);
+        res.status(500).json({ error: 'Ошибка сервера при reorder' });
     }
+});
+
+app.post('/select', async (req, res) => {
+    const { id, selected } = req.body;
+    const item = sortedOrder.get(id);
+    if (!item) return res.status(404).json({ error: 'Item not found' });
+
+    item.selected = !!selected;
+    sortedOrder.set(id, item);
+
+    await saveSortedOrder();
+    res.json({ success: true });
 });
 
 app.use(express.static(path.join(__dirname, '../frontend/dist')));

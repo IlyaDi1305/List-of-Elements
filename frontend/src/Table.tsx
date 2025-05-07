@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { postBatchChanges } from './api';
+import { postReorder, postSelectionChange } from './api';
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 interface Item {
@@ -82,7 +82,7 @@ const Table: React.FC = () => {
             item.selected = !item.selected;
             updated.set(id, item);
             setItems(new Map(updated));
-            await postBatchChanges([item]);
+            await postSelectionChange(item);
         }
     };
 
@@ -90,24 +90,28 @@ const Table: React.FC = () => {
         DraggingId = id;
     };
 
-    const onDrop = async (_: React.DragEvent, id: string) => {
-        if (!DraggingId || DraggingId === id) return;
+    const onDrop = (_: React.DragEvent, targetId: string) => {
+        if (!DraggingId || DraggingId === targetId) return;
 
         const updated = new Map(items);
-        const item1 = updated.get(DraggingId);
-        const item2 = updated.get(id);
+        const draggedItem = updated.get(DraggingId);
+        const targetItem = updated.get(targetId);
+        if (!draggedItem || !targetItem) return;
 
-        if (item1 && item2) {
-            const temp = item1.position;
-            item1.position = item2.position;
-            item2.position = temp;
+        const allItems = Array.from(updated.values()).sort((a, b) => a.position - b.position);
 
-            updated.set(item1.id, item1);
-            updated.set(item2.id, item2);
-            setItems(new Map(updated));
+        const draggedIndex = allItems.findIndex(i => i.id === DraggingId);
+        const dragged = allItems.splice(draggedIndex, 1)[0];
+        const targetIndex = allItems.findIndex(i => i.id === targetId);
+        allItems.splice(targetIndex, 0, dragged);
 
-            await postBatchChanges([item1, item2]);
-        }
+        allItems.forEach((item, idx) => {
+            item.position = idx + 1;
+            updated.set(item.id, item);
+        });
+
+        setItems(new Map(updated));
+        void postReorder(DraggingId, targetId);
 
         DraggingId = null;
     };
@@ -126,6 +130,10 @@ const Table: React.FC = () => {
             void fetchItems(true, inputValue);
         }
     };
+
+    const filteredItems = Array.from(items.values())
+        .filter(item => item.name.toLowerCase().includes(search.toLowerCase()))
+        .sort((a, b) => a.position - b.position);
 
     if (isBooting || isLoadingSearch) {
         return (
@@ -174,7 +182,7 @@ const Table: React.FC = () => {
             </div>
 
             <InfiniteScroll
-                dataLength={items.size}
+                dataLength={filteredItems.length}
                 next={() => fetchItems(false, search)}
                 hasMore={hasMore}
                 scrollableTarget="scrollableDiv"
@@ -184,34 +192,30 @@ const Table: React.FC = () => {
                 <table className="table">
                     <thead>
                     <tr>
-                        <th>№</th>
                         <th>Name</th>
                         <th>Select</th>
                     </tr>
                     </thead>
                     <tbody>
-                    {Array.from(items.values())
-                        .sort((a, b) => a.position - b.position)
-                        .map((item) => (
-                            <tr
-                                key={item.id}
-                                className="row" // без .selected
-                                draggable
-                                onDragStart={(e) => onDragStart(e, item.id)}
-                                onDrop={(e) => onDrop(e, item.id)}
-                                onDragOver={onDragOver}
-                            >
-                                <td>{item.position}</td>
-                                <td>{item.name}</td>
-                                <td>
-                                    <input
-                                        type="checkbox"
-                                        checked={item.selected}
-                                        onChange={() => handleSelect(item.id)}
-                                    />
-                                </td>
-                            </tr>
-                        ))}
+                    {filteredItems.map((item) => (
+                        <tr
+                            key={item.id}
+                            className="row"
+                            draggable
+                            onDragStart={(e) => onDragStart(e, item.id)}
+                            onDrop={(e) => onDrop(e, item.id)}
+                            onDragOver={onDragOver}
+                        >
+                            <td>{item.name}</td>
+                            <td>
+                                <input
+                                    type="checkbox"
+                                    checked={item.selected}
+                                    onChange={() => handleSelect(item.id)}
+                                />
+                            </td>
+                        </tr>
+                    ))}
                     </tbody>
                 </table>
             </InfiniteScroll>
